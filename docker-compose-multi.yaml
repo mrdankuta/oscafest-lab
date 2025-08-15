@@ -1,0 +1,188 @@
+version: '3.8'
+
+networks:
+  workshop-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  ssh-keys:
+
+services:
+  # SSH Keys and Configuration Generator
+  ssh-keys-and-config:
+    hostname: shared-ssh-keys
+    image: dankuta/vlab:ssh-client
+    deploy:
+      restart_policy:
+        max_attempts: 0
+    volumes:
+      - ssh-keys:/shared/ssh-keys
+    command: |
+      bash -c 'rm -rf /shared/ssh-keys/*; ssh-keygen -f /shared/ssh-keys/id_rsa -P "" <<< y; cp -rf /shared/ssh-keys/id_rsa /shared/ssh-keys/root_ssh; cp -rf /shared/ssh-keys/id_rsa.pub /shared/ssh-keys/root_ssh.pub; echo guest > /shared/ssh-keys/guest_name; echo guest > /shared/ssh-keys/guest_passwd; echo "/bin/bash" > /shared/ssh-keys/guest_shell; echo root > /shared/ssh-keys/root_passwd'
+    networks:
+      - workshop-network
+
+  # Platform Cluster (Kratix + MinIO)
+  platform-cluster:
+    image: dankuta/workshop-controlplane:latest
+    hostname: platform-cluster
+    tty: true
+    tmpfs:
+      - /run
+      - /var/run
+    privileged: true
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+    volumes:
+      - ssh-keys:/shared/ssh-keys:rw
+    ports:
+      - "6443:6443"    # Kubernetes API
+      - "2222:22"      # SSH
+      - "7681:7681"    # ttyd terminal
+      - "9000:9000"    # MinIO API
+      - "9001:9001"    # MinIO Console
+      - "20001:31001"  # Kiali dashboard (NodePort)
+      - "3000:31002"   # Grafana dashboard (NodePort)
+      - "16686:31003"  # Jaeger tracing (NodePort)
+      - "9090:31004"   # Prometheus (NodePort)
+    environment:
+      - CLUSTER_ROLE=platform
+      - CLUSTER_NAME=platform
+      - PLATFORM_CLUSTER=platform-cluster
+      - INSTALL_KRATIX=true
+      - INSTALL_MINIO=true
+    networks:
+      workshop-network:
+        ipv4_address: 172.20.0.10
+    depends_on:
+      - ssh-keys-and-config
+    healthcheck:
+      test: ["CMD", "kubectl", "get", "nodes"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # Development Worker Cluster
+  dev-cluster:
+    image: dankuta/workshop-controlplane:latest
+    hostname: dev-cluster
+    tty: true
+    tmpfs:
+      - /run
+      - /var/run
+    privileged: true
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    volumes:
+      - ssh-keys:/shared/ssh-keys:rw
+    ports:
+      - "6444:6443"    # Kubernetes API
+      - "2223:22"      # SSH
+      - "7682:7681"    # ttyd terminal
+    environment:
+      - CLUSTER_ROLE=worker
+      - CLUSTER_NAME=dev
+      - WORKER_GITOPS_PATH=dev
+      - PLATFORM_CLUSTER=platform-cluster
+      - INSTALL_KRATIX=false
+      - INSTALL_MINIO=false
+    networks:
+      workshop-network:
+        ipv4_address: 172.20.0.20
+    depends_on:
+      - ssh-keys-and-config
+    healthcheck:
+      test: ["CMD", "kubectl", "get", "nodes"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # Staging Worker Cluster
+  staging-cluster:
+    image: dankuta/workshop-controlplane:latest
+    hostname: staging-cluster
+    tty: true
+    tmpfs:
+      - /run
+      - /var/run
+    privileged: true
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    volumes:
+      - ssh-keys:/shared/ssh-keys:rw
+    ports:
+      - "6445:6443"    # Kubernetes API
+      - "2224:22"      # SSH
+      - "7683:7681"    # ttyd terminal
+    environment:
+      - CLUSTER_ROLE=worker
+      - CLUSTER_NAME=staging
+      - WORKER_GITOPS_PATH=staging
+      - PLATFORM_CLUSTER=platform-cluster
+      - INSTALL_KRATIX=false
+      - INSTALL_MINIO=false
+    networks:
+      workshop-network:
+        ipv4_address: 172.20.0.30
+    depends_on:
+      - ssh-keys-and-config
+    healthcheck:
+      test: ["CMD", "kubectl", "get", "nodes"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # Portal Service
+  portal:
+    image: dankuta/workshop-portal:latest
+    tty: true
+    tmpfs:
+      - /run
+      - /var/run
+    privileged: true
+    ports: 
+      - 32535:80 # Main Page
+      - 32536:1000 # Web Tunnel
+    volumes: []
+    environment:
+      - PLATFORM_CLUSTER_URL=http://platform-cluster:6443
+      - DEV_CLUSTER_URL=http://dev-cluster:6443
+      - STAGING_CLUSTER_URL=http://staging-cluster:6443
+      - MINIO_URL=http://platform-cluster:9000
+      - MINIO_CONSOLE_URL=http://platform-cluster:9001
+    networks:
+      workshop-network:
+        ipv4_address: 172.20.0.40
+    depends_on:
+      - platform-cluster
+      - dev-cluster
+      - staging-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
