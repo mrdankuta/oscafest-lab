@@ -167,7 +167,8 @@ services:
     ports: 
       - 32535:80 # Main Page
       - 32536:1000 # Web Tunnel
-    volumes: []
+    volumes:
+      - ssh-keys:/shared/ssh-keys:rw
     environment:
       - PLATFORM_CLUSTER_URL=http://platform-cluster:6443
       - DEV_CLUSTER_URL=http://dev-cluster:6443
