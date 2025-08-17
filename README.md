@@ -14,10 +14,10 @@ Welcome to the workshop! This lab provides a hands-on environment to explore pla
 
 ```bash
 # Download the docker-compose file
-curl -O https://raw.githubusercontent.com/dankuta/oscafest-lab/main/docker-compose.yaml
+curl -O https://raw.githubusercontent.com/mrdankuta/oscafest-lab/main/docker-compose.yaml
 
 # Or clone the repository if available
-git clone https://github.com/dankuta/oscafest-lab.git
+git clone https://github.com/mrdankuta/oscafest-lab.git
 cd oscafest-lab
 ```
 
